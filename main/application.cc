@@ -61,7 +61,11 @@ void Application::CheckNewVersion() {
     ota_.SetPostData(board.GetJson());
 
     while (true) {
-        if (ota_.CheckVersion()) {
+        bool success = ota_.CheckVersion();
+        if (ota_.HasActivationCode()) {
+            DisplayActivationCode();
+        }
+        if (success) {
             if (ota_.HasNewVersion()) {
                 Alert("Info", "正在升级固件");
                 // Wait for the chat state to be idle
@@ -77,7 +81,7 @@ void Application::CheckNewVersion() {
                     display->SetStatus("新版本 " + ota_.GetFirmwareVersion());
 
                     board.SetPowerSaveMode(false);
-#if CONFIG_IDF_TARGET_ESP32S3
+#if CONFIG_USE_AUDIO_PROCESSING
                     wake_word_detect_.StopDetection();
 #endif
                     // 预先关闭音频输出，避免升级过程有音频操作
@@ -113,6 +117,13 @@ void Application::CheckNewVersion() {
         // Check again in 60 seconds
         vTaskDelay(pdMS_TO_TICKS(60000));
     }
+}
+
+void Application::DisplayActivationCode() {
+    ESP_LOGW(TAG, "Activation Message: %s", ota_.GetActivationMessage().c_str());
+    ESP_LOGW(TAG, "Activation Code: %s", ota_.GetActivationCode().c_str());
+    auto display = Board::GetInstance().GetDisplay();
+    display->ShowNotification(ota_.GetActivationMessage(), 30000);
 }
 
 void Application::Alert(const std::string& title, const std::string& message) {
@@ -365,7 +376,7 @@ void Application::Start() {
     }, "check_new_version", 4096 * 2, this, 1, nullptr);
 
 
-#if CONFIG_IDF_TARGET_ESP32S3
+#if CONFIG_USE_AUDIO_PROCESSING
     audio_processor_.Initialize(codec->input_channels(), codec->input_reference());
     audio_processor_.OnOutput([this](std::vector<int16_t>&& data) {
         background_task_->Schedule([this, data = std::move(data)]() mutable {
@@ -551,7 +562,7 @@ void Application::InputAudio() {
         }
     }
     
-#if CONFIG_IDF_TARGET_ESP32S3
+#if CONFIG_USE_AUDIO_PROCESSING
     if (audio_processor_.IsRunning()) {
         audio_processor_.Input(data);
     }
@@ -595,7 +606,7 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateIdle:
             display->SetStatus("待命");
             display->SetEmotion("neutral");
-#ifdef CONFIG_IDF_TARGET_ESP32S3
+#ifdef CONFIG_USE_AUDIO_PROCESSING
             audio_processor_.Stop();
 #endif
             break;
@@ -607,7 +618,7 @@ void Application::SetDeviceState(DeviceState state) {
             display->SetEmotion("neutral");
             ResetDecoder();
             opus_encoder_->ResetState();
-#if CONFIG_IDF_TARGET_ESP32S3
+#if CONFIG_USE_AUDIO_PROCESSING
             audio_processor_.Start();
 #endif
             UpdateIotStates();
@@ -615,7 +626,7 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateSpeaking:
             display->SetStatus("说话中...");
             ResetDecoder();
-#if CONFIG_IDF_TARGET_ESP32S3
+#if CONFIG_USE_AUDIO_PROCESSING
             audio_processor_.Stop();
 #endif
             break;
