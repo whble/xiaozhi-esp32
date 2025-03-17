@@ -1,3 +1,5 @@
+#include "display/lv_display.h"
+#include "misc/lv_event.h"
 #include "wifi_board.h"
 #include "sensecap_audio_codec.h"
 #include "display/lcd_display.h"
@@ -6,6 +8,7 @@
 #include "button.h"
 #include "config.h"
 #include "iot/thing_manager.h"
+#include "power_save_timer.h"
 
 #include <esp_log.h>
 #include "esp_check.h"
@@ -17,7 +20,8 @@
 #include <driver/spi_common.h>
 #include <wifi_station.h>
 #include <iot_button.h>
-#include "esp_io_expander_tca95xx_16bit.h"
+#include <esp_io_expander_tca95xx_16bit.h>
+#include <esp_sleep.h>
 
 #define TAG "sensecap_watcher"
 
@@ -31,6 +35,37 @@ private:
     LcdDisplay* display_;
     esp_io_expander_handle_t io_exp_handle;
     button_handle_t btns;
+    PowerSaveTimer* power_save_timer_;
+    esp_lcd_panel_io_handle_t panel_io_ = nullptr;
+    esp_lcd_panel_handle_t panel_ = nullptr;
+
+    void InitializePowerSaveTimer() {
+        power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            ESP_LOGI(TAG, "Enabling sleep mode");
+            auto display = GetDisplay();
+            display->SetChatMessage("system", "");
+            display->SetEmotion("sleepy");
+            GetBacklight()->SetBrightness(10);
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+            auto display = GetDisplay();
+            display->SetChatMessage("system", "");
+            display->SetEmotion("neutral");
+            GetBacklight()->RestoreBrightness();
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            ESP_LOGI(TAG, "Shutting down");
+            bool is_charging = (IoExpanderGetLevel(BSP_PWR_VBUS_IN_DET) == 0);
+            if (is_charging) {
+                ESP_LOGI(TAG, "charging");
+                GetBacklight()->SetBrightness(0);
+            } else {
+                IoExpanderSetLevel(BSP_PWR_SYSTEM, 0);
+            }
+        });
+        power_save_timer_->SetEnabled(true);
+    }
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -95,6 +130,13 @@ private:
                 .priv = this,
             },
         };
+        
+        //watcher 是通过长按滚轮进行开机的, 需要等待滚轮释放, 否则用户开机松手时可能会误触成单击
+        ESP_LOGI(TAG, "waiting for knob button release");
+        while(IoExpanderGetLevel(BSP_KNOB_BTN) == 0) {
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+        }
+
         btns = iot_button_create(&btn_config);
         iot_button_register_cb(btns, BUTTON_SINGLE_CLICK, [](void* button_handle, void* usr_data) {
             auto self = static_cast<SensecapWatcher*>(usr_data);
@@ -102,6 +144,7 @@ private:
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 self->ResetWifiConfiguration();
             }
+            self->power_save_timer_->WakeUp();
             app.ToggleChatState();
         }, this);
         iot_button_register_cb(btns, BUTTON_LONG_PRESS_START, [](void* button_handle, void* usr_data) {
@@ -110,8 +153,8 @@ private:
             if (is_charging) {
                 ESP_LOGI(TAG, "charging");
             } else {
-                self->IoExpanderSetLevel(BSP_PWR_SYSTEM, 0);
                 self->IoExpanderSetLevel(BSP_PWR_LCD, 0);
+                self->IoExpanderSetLevel(BSP_PWR_SYSTEM, 0);
             }
         }, this);
     }
@@ -131,9 +174,6 @@ private:
     }
 
     void Initializespd2010Display() {
-        esp_lcd_panel_io_handle_t ret_io;
-        esp_lcd_panel_handle_t ret_panel;
-
         ESP_LOGI(TAG, "Install panel IO");
         const esp_lcd_panel_io_spi_config_t io_config = {
             .cs_gpio_num = BSP_LCD_SPI_CS,
@@ -152,7 +192,7 @@ private:
                 .use_qspi_interface = 1,
             },
         };
-        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)BSP_LCD_SPI_NUM, &io_config, &ret_io);
+        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)BSP_LCD_SPI_NUM, &io_config, &panel_io_);
     
         ESP_LOGD(TAG, "Install LCD driver");
         const esp_lcd_panel_dev_config_t panel_config = {
@@ -161,21 +201,37 @@ private:
             .bits_per_pixel = DRV_LCD_BITS_PER_PIXEL,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_spd2010(ret_io, &panel_config, &ret_panel);
-    
-        esp_lcd_panel_reset(ret_panel);
-        esp_lcd_panel_init(ret_panel);
-        esp_lcd_panel_mirror(ret_panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-        esp_lcd_panel_disp_on_off(ret_panel, true);
-        
-        //TODO
-        display_ = new SpiLcdDisplay(ret_io, ret_panel,
+        esp_lcd_new_panel_spd2010(panel_io_, &panel_config, &panel_);
+
+        esp_lcd_panel_reset(panel_);
+        esp_lcd_panel_init(panel_);
+        esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        esp_lcd_panel_disp_on_off(panel_, true);
+
+        display_ = new SpiLcdDisplay(panel_io_, panel_,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             {
                 .text_font = &font_puhui_30_4,
                 .icon_font = &font_awesome_30_4,
                 .emoji_font = font_emoji_64_init(),
             });
+        
+        // 使每次刷新的行数是4的倍数，防止花屏
+        lv_display_add_event_cb(lv_display_get_default(), [](lv_event_t *e) {
+                lv_area_t *area = (lv_area_t *)lv_event_get_param(e);
+                uint16_t x1 = area->x1;
+                uint16_t x2 = area->x2;
+                // round the start of area down to the nearest 4N number
+                area->x1 = (x1 >> 2) << 2;
+                // round the start of area down to the nearest 4N number
+                area->x1 = (x1 >> 2) << 2;
+              
+                // round the end of area up to the nearest 4M+3 number
+                area->x2 = ((x2 >> 2) << 2) + 3;
+                // round the end of area up to the nearest 4M+3 number
+                area->x2 = ((x2 >> 2) << 2) + 3;
+        }, LV_EVENT_INVALIDATE_AREA, NULL);
+        
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -188,6 +244,7 @@ private:
 public:
     SensecapWatcher(){
         ESP_LOGI(TAG, "Initialize Sensecap Watcher");
+        InitializePowerSaveTimer();
         InitializeI2c();
         InitializeSpi();
         InitializeExpander();
@@ -221,6 +278,13 @@ public:
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
+    }
+
+    virtual void SetPowerSaveMode(bool enabled) override {
+        if (!enabled) {
+            power_save_timer_->WakeUp();
+        }
+        WifiBoard::SetPowerSaveMode(enabled);
     }
 };
 
