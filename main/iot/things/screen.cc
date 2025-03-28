@@ -20,6 +20,12 @@ public:
             return theme;
         });
 
+        // 设定设备UI模式
+        properties_.AddStringProperty("mode","模式",[this]()-> std::string{
+            auto mode = Board::GetInstance().GetDisplay()->GetMode();
+            return mode;
+        });
+
         properties_.AddNumberProperty("brightness", "当前亮度百分比", [this]() -> int {
             // 这里可以添加获取当前亮度的逻辑
             auto backlight = Board::GetInstance().GetBacklight();
@@ -37,6 +43,16 @@ public:
             }
         });
         
+        methods_.AddMethod("SetMode","设置界面模式",ParameterList({
+            Parameter("mode_name", "界面模式, normal 或 wechat", kValueTypeString, true)
+        }),[this](const ParameterList& parameters) {
+            std::string mode_name = static_cast<std::string>(parameters["mode_name"].string());
+            auto display = Board::GetInstance().GetDisplay();
+            if (display) {
+                display->SetMode(mode_name);
+            }
+        });
+
         methods_.AddMethod("SetBrightness", "设置亮度", ParameterList({
             Parameter("brightness", "0到100之间的整数", kValueTypeNumber, true)
         }), [this](const ParameterList& parameters) {

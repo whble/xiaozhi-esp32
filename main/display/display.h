@@ -26,8 +26,9 @@ public:
     virtual void SetChatMessage(const char* role, const char* content);
     virtual void SetIcon(const char* icon);
     virtual void SetTheme(const std::string& theme_name);
+    virtual void SetMode(const std::string& mode_name);
     virtual std::string GetTheme() { return current_theme_name_; }
-
+    virtual std::string GetMode() { return current_mode_name_; }
     inline int width() const { return width_; }
     inline int height() const { return height_; }
 
@@ -51,6 +52,7 @@ protected:
     const char* network_icon_ = nullptr;
     bool muted_ = false;
     std::string current_theme_name_;
+    std::string current_mode_name_;
 
     esp_timer_handle_t notification_timer_ = nullptr;
     esp_timer_handle_t update_timer_ = nullptr;

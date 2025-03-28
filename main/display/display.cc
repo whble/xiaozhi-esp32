@@ -259,3 +259,9 @@ void Display::SetTheme(const std::string& theme_name) {
     Settings settings("display", true);
     settings.SetString("theme", theme_name);
 }
+
+void Display::SetMode(const std::string& mode_name) {
+    current_mode_name_ = mode_name;
+    Settings settings("display", true);
+    settings.SetString("mode", mode_name);
+}
