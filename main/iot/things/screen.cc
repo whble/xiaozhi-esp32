@@ -20,11 +20,11 @@ public:
             return theme;
         });
 
-        // 设定设备UI模式
-        properties_.AddStringProperty("mode","模式",[this]()-> std::string{
-            auto mode = Board::GetInstance().GetDisplay()->GetMode();
-            return mode;
-        });
+        //设定设备UI模式
+        // properties_.AddStringProperty("mode", "模式", [this]() -> std::string {
+        //     auto mode = Board::GetInstance().GetDisplay()->GetMode();
+        //     return mode;
+        // });
 
         properties_.AddNumberProperty("brightness", "当前亮度百分比", [this]() -> int {
             // 这里可以添加获取当前亮度的逻辑
