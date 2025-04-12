@@ -18,15 +18,56 @@
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
 
-class Dev_disyplay : public SpiLcdDisplay {
+class DevDisyplay : public SpiLcdDisplay {
+private:    
+    lv_obj_t *user_messge_label_ = nullptr;
+    lv_obj_t *ai_messge_label_ = nullptr;
+    lv_obj_t* ui_wifisetting_group = nullptr;
  public:
-    Dev_disyplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+    DevDisyplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
                   int width, int height, int offset_x, int offset_y,
                   bool mirror_x, bool mirror_y, bool swap_xy,
-                  DisplayFonts fonts);
+                  DisplayFonts fonts):SpiLcdDisplay( panel_io,  panel,
+                   width,  height,  offset_x,  offset_y,
+                   mirror_x,  mirror_y,  swap_xy,
+                   fonts){}
 
-  void SetupUI() override {
-    lv_obj_del(chat_message_label_);
+  void SetupUI2()  {
+
+    DisplayLockGuard lock(this);
+
+    ui_wifisetting_group = lv_obj_create(screen);
+    lv_obj_set_width(ui_wifisetting_group, 200);
+    lv_obj_set_height(ui_wifisetting_group, 200);
+    lv_obj_set_align(ui_wifisetting_group, LV_ALIGN_CENTER);
+   // lv_obj_add_flag(ui_wifisetting_group, LV_OBJ_FLAG_HIDDEN);     /// Flags
+    lv_obj_clear_flag(ui_wifisetting_group, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_bg_color(ui_wifisetting_group, lv_color_hex(0xFE9900), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_wifisetting_group, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    // ui_wifititle_label = lv_label_create(ui_wifisetting_group);
+    // lv_obj_set_width(ui_wifititle_label, LV_SIZE_CONTENT);   /// 1
+    // lv_obj_set_height(ui_wifititle_label, LV_SIZE_CONTENT);    /// 1
+    // lv_obj_set_x(ui_wifititle_label, 0);
+    // lv_obj_set_y(ui_wifititle_label, -50);
+    // lv_obj_set_align(ui_wifititle_label, LV_ALIGN_CENTER);
+    // lv_label_set_text(ui_wifititle_label, "无线网络设置");
+    // lv_obj_set_style_text_color(ui_wifititle_label, lv_color_hex(color_font), LV_PART_MAIN | LV_STATE_DEFAULT);
+    // lv_obj_set_style_text_opa(ui_wifititle_label, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // lv_obj_set_style_text_font(ui_wifititle_label, &ali_font_16, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    // ui_wifiimformation_label = lv_label_create(ui_wifisetting_group);
+    // lv_obj_set_width(ui_wifiimformation_label, 200);   /// 1
+    // lv_obj_set_height(ui_wifiimformation_label, LV_SIZE_CONTENT);    /// 1
+    // lv_obj_set_x(ui_wifiimformation_label, 0);
+    // lv_obj_set_y(ui_wifiimformation_label, -20);
+    // lv_obj_set_align(ui_wifiimformation_label, LV_ALIGN_CENTER);
+    // lv_label_set_text(ui_wifiimformation_label, "请扫描wifi二维码连接无线网络!");
+    // lv_obj_set_style_text_color(ui_wifiimformation_label, lv_color_hex(color_font), LV_PART_MAIN | LV_STATE_DEFAULT);
+    // lv_obj_set_style_text_opa(ui_wifiimformation_label, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // lv_obj_set_style_text_font(ui_wifiimformation_label, &ali_font_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    
   };
 };
 
@@ -84,7 +125,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_;
     i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
-    SpiLcdDisplay* display_;
+    DevDisyplay* display_;
     Pca9557* pca9557_;
     Ft6336* ft6336_;
     esp_timer_handle_t touchpad_timer_;
@@ -203,7 +244,7 @@ private:
         esp_lcd_panel_invert_color(panel, true);
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-        display_ = new SpiLcdDisplay(panel_io, panel,
+        display_ = new DevDisyplay(panel_io, panel,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
                                     {
                                         .text_font = &font_puhui_20_4,
@@ -214,6 +255,7 @@ private:
                                         .emoji_font = font_emoji_64_init(),
 #endif
                                     });
+        display_->SetupUI2();
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -234,6 +276,7 @@ public:
         InitializeIot();
         InitializeFt6336TouchPad();
         GetBacklight()->RestoreBrightness();
+        GetAudioCodec()->SetOutputVolume(10);
     }
 
     virtual AudioCodec* GetAudioCodec() override {
