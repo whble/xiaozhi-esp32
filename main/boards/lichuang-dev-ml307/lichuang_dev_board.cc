@@ -13,10 +13,153 @@
 #include <driver/spi_common.h>
 #include <wifi_station.h>
 
+#include "math.h"
+
 #define TAG "LichuangDevBoard ml307"
 
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
+
+class Qmi8658a : public I2cDevice
+{
+    public:
+         
+        // QMI8658寄存器地址
+        enum qmi8658_reg
+        {
+            QMI8658_WHO_AM_I,
+            QMI8658_REVISION_ID,
+            QMI8658_CTRL1,
+            QMI8658_CTRL2,
+            QMI8658_CTRL3,
+            QMI8658_CTRL4,
+            QMI8658_CTRL5,
+            QMI8658_CTRL6,
+            QMI8658_CTRL7,
+            QMI8658_CTRL8,
+            QMI8658_CTRL9,
+            QMI8658_CATL1_L,
+            QMI8658_CATL1_H,
+            QMI8658_CATL2_L,
+            QMI8658_CATL2_H,
+            QMI8658_CATL3_L,
+            QMI8658_CATL3_H,
+            QMI8658_CATL4_L,
+            QMI8658_CATL4_H,
+            QMI8658_FIFO_WTM_TH,
+            QMI8658_FIFO_CTRL,
+            QMI8658_FIFO_SMPL_CNT,
+            QMI8658_FIFO_STATUS,
+            QMI8658_FIFO_DATA,
+            QMI8658_STATUSINT = 45,
+            QMI8658_STATUS0,
+            QMI8658_STATUS1,
+            QMI8658_TIMESTAMP_LOW,
+            QMI8658_TIMESTAMP_MID,
+            QMI8658_TIMESTAMP_HIGH,
+            QMI8658_TEMP_L,
+            QMI8658_TEMP_H,
+            QMI8658_AX_L,
+            QMI8658_AX_H,
+            QMI8658_AY_L,
+            QMI8658_AY_H,
+            QMI8658_AZ_L,
+            QMI8658_AZ_H,
+            QMI8658_GX_L,
+            QMI8658_GX_H,
+            QMI8658_GY_L,
+            QMI8658_GY_H,
+            QMI8658_GZ_L,
+            QMI8658_GZ_H,
+            QMI8658_COD_STATUS = 70,
+            QMI8658_dQW_L = 73,
+            QMI8658_dQW_H,
+            QMI8658_dQX_L,
+            QMI8658_dQX_H,
+            QMI8658_dQY_L,
+            QMI8658_dQY_H,
+            QMI8658_dQZ_L,
+            QMI8658_dQZ_H,
+            QMI8658_dVX_L,
+            QMI8658_dVX_H,
+            QMI8658_dVY_L,
+            QMI8658_dVY_H,
+            QMI8658_dVZ_L,
+            QMI8658_dVZ_H,
+            QMI8658_TAP_STATUS = 89,
+            QMI8658_STEP_CNT_LOW,
+            QMI8658_STEP_CNT_MIDL,
+            QMI8658_STEP_CNT_HIGH,
+            QMI8658_RESET = 96
+        };
+        // 倾角结构体
+        typedef  struct{
+            int16_t acc_x;
+            int16_t acc_y;
+            int16_t acc_z;
+            int16_t gyr_x;
+            int16_t gyr_y;
+            int16_t gyr_z;
+            float AngleX;
+            float AngleY;
+            float AngleZ;
+        }t_sQMI8658;
+
+        t_sQMI8658* QMI8658;
+
+        Qmi8658a(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
+        if(0x05==ReadReg(QMI8658_WHO_AM_I))
+        {
+            ESP_LOGI(TAG, "QMI8658 OK!");  // 打印信息
+            WriteReg(QMI8658_RESET, 0xb0);  // 复位  
+            vTaskDelay(10 / portTICK_PERIOD_MS);  // 延时10ms
+            WriteReg(QMI8658_CTRL1, 0x40); // CTRL1 设置地址自动增加
+            WriteReg(QMI8658_CTRL7, 0x03); // CTRL7 允许加速度和陀螺仪
+            WriteReg(QMI8658_CTRL2, 0x95); // CTRL2 设置ACC 4g 250Hz
+            WriteReg(QMI8658_CTRL3, 0xd5); // CTRL3 设置GRY 512dps 250Hz 
+            QMI8658 =new t_sQMI8658();
+        }
+        else
+        {
+            ESP_LOGI(TAG, "QMI8658 Not Detected!"); 
+        }
+
+    }
+
+    // 读取加速度和陀螺仪寄存器值
+    void qmi8658_Read_AccAndGry(t_sQMI8658 *p)
+    {
+        uint8_t status, data_ready=0;
+        int16_t buf[6];
+        status = ReadReg(QMI8658_STATUS0); // 读状态寄存器 
+        if (status & 0x03) // 判断加速度和陀螺仪数据是否可读
+            data_ready = 1;
+        if (data_ready == 1){  // 如果数据可读
+            data_ready = 0;
+            ReadRegs(QMI8658_AX_L, (uint8_t *)buf, 12); // 读加速度和陀螺仪值
+            p->acc_x = buf[0];
+            p->acc_y = buf[1];
+            p->acc_z = buf[2];
+            p->gyr_x = buf[3];
+            p->gyr_y = buf[4];
+            p->gyr_z = buf[5];
+        }
+    }
+
+    void qmi8658_fetch_angleFromAcc(t_sQMI8658 *p)
+    {
+        float temp;
+
+        qmi8658_Read_AccAndGry(p); // 读取加速度和陀螺仪的寄存器值
+        // 根据寄存器值 计算倾角值 并把弧度转换成角度
+        temp = (float)p->acc_x / sqrt( ((float)p->acc_y * (float)p->acc_y + (float)p->acc_z * (float)p->acc_z) );
+        p->AngleX = atan(temp)*57.29578f; // 180/π=57.29578
+        temp = (float)p->acc_y / sqrt( ((float)p->acc_x * (float)p->acc_x + (float)p->acc_z * (float)p->acc_z) );
+        p->AngleY = atan(temp)*57.29578f; // 180/π=57.29578
+        temp = sqrt( ((float)p->acc_x * (float)p->acc_x + (float)p->acc_y * (float)p->acc_y) ) / (float)p->acc_z;
+        p->AngleZ = atan(temp)*57.29578f; // 180/π=57.29578
+    }
+};
 
 class DevDisyplay : public SpiLcdDisplay {
 private:    
@@ -32,7 +175,45 @@ private:
                    mirror_x,  mirror_y,  swap_xy,
                    fonts){}
 
-  void SetupUI2()  {
+    void set_rotation(lv_display_rotation_t rotation)
+    {
+        
+        // 设置屏幕旋转
+        lv_disp_set_rotation(display_, rotation);
+
+        // 获取当前屏幕的宽高
+        lv_coord_t hor_res = lv_disp_get_hor_res(display_);
+        lv_coord_t ver_res = lv_disp_get_ver_res(display_);
+
+        // 根据旋转方向调整分辨率
+        if (rotation == LV_DISPLAY_ROTATION_90 || rotation == LV_DISPLAY_ROTATION_270) {
+            // 旋转 90 度或 270 度时，宽高交换
+            lv_display_set_resolution(display_, ver_res, hor_res);
+        } else {
+            // 旋转 0 度或 180 度时，宽高不变
+            lv_display_set_resolution(display_, hor_res, ver_res);
+        }
+
+        // 刷新屏幕，确保显示内容更新
+        //lv_disp_flush_start(display_);
+    }
+
+    lv_display_rotation_t get_rotation()
+    {
+        return lv_disp_get_rotation(display_);
+    }
+
+    int32_t get_h()
+    {
+       return lv_display_get_horizontal_resolution(display_);
+    }
+
+    int32_t get_v()
+    {
+       return lv_display_get_vertical_resolution(display_);
+    }
+
+    void SetupUI2()  {
 
     DisplayLockGuard lock(this);
 
@@ -123,6 +304,7 @@ public:
 class LichuangDevBoard : public Ml307Board {
 private:
     uint8_t vol_buf;
+    uint8_t fangxiang;
     i2c_master_bus_handle_t i2c_bus_;
     i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
@@ -130,6 +312,8 @@ private:
     Pca9557* pca9557_;
     Ft6336* ft6336_;
     esp_timer_handle_t touchpad_timer_;
+    esp_timer_handle_t qmi8658a_timer_;
+    Qmi8658a* Qmi8658a_;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -151,6 +335,31 @@ private:
         pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
+    void HandleQmi8658a()
+    {    
+        Qmi8658a_->qmi8658_fetch_angleFromAcc(Qmi8658a_->QMI8658);
+        // 输出XYZ轴的倾角
+        ESP_LOGI(TAG, "angle_x = %.1f  angle_y = %.1f angle_z = %.1f",Qmi8658a_->QMI8658->AngleX, Qmi8658a_->QMI8658->AngleY, Qmi8658a_->QMI8658->AngleZ);
+
+    }
+    void InitializeQmi8658a()
+    {
+        ESP_LOGI(TAG,"Init Qmi8658a");
+        Qmi8658a_ = new Qmi8658a(i2c_bus_,0x6A);
+
+        esp_timer_create_args_t qmi_timer_args = {
+            .callback = [](void* arg){
+                LichuangDevBoard* board = (LichuangDevBoard*)arg;
+                board->HandleQmi8658a();
+            },
+            .arg = this,
+            .name ="qmi8658_timer",
+            .skip_unhandled_events = true,
+        };
+
+        ESP_ERROR_CHECK(esp_timer_create(&qmi_timer_args, &qmi8658a_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(qmi8658a_timer_, 1000 * 1000));
+    }
     void PollTouchpad() {
         static bool was_touched = false;
         static int64_t touch_start_time = 0;
@@ -171,8 +380,16 @@ private:
             
             // 只有短触才触发
             if (touch_duration < TOUCH_THRESHOLD_MS) {
-                auto& app = Application::GetInstance();
-                app.ToggleChatState();
+                //auto& app = Application::GetInstance();
+                //app.ToggleChatState();
+                lv_display_rotation_t rotation = display_->get_rotation();
+                rotation = static_cast<lv_display_rotation_t>(static_cast<int>(rotation) + 1);
+                if (rotation > LV_DISPLAY_ROTATION_270) {
+                    rotation = LV_DISPLAY_ROTATION_0;
+                }
+                display_->set_rotation(rotation);
+
+                ESP_LOGI(TAG,"H=%ld,V=%ld,R=%ld",display_->get_h(),display_->get_v(),(int32_t)display_->get_rotation());
             }
             else
             {
@@ -256,8 +473,8 @@ private:
 
         esp_lcd_panel_init(panel);
         esp_lcd_panel_invert_color(panel, true);
-        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
-        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+      //  esp_lcd_panel_swap_xy(panel, false);
+       // esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         display_ = new DevDisyplay(panel_io, panel,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
                                     {
@@ -270,6 +487,10 @@ private:
 #endif
                                     });
         display_->SetupUI2();
+       
+    
+         
+        
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -289,9 +510,10 @@ public:
         InitializeButtons();
         InitializeIot();
         InitializeFt6336TouchPad();
+        InitializeQmi8658a();
         GetBacklight()->RestoreBrightness();
-       // GetAudioCodec()->SetOutputVolume(10);
-       vol_buf = GetAudioCodec()->output_volume();
+        vol_buf = GetAudioCodec()->output_volume();
+        fangxiang=0;
     }
 
     virtual AudioCodec* GetAudioCodec() override {
