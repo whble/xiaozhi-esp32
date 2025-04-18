@@ -69,6 +69,7 @@ public:
 
 class LichuangDevBoard : public WifiBoard {
 private:
+    uint8_t vol_buf;
     i2c_master_bus_handle_t i2c_bus_;
     i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
@@ -123,6 +124,19 @@ private:
                     ResetWifiConfiguration();
                 }
                 app.ToggleChatState();
+            }
+            else
+            {
+                uint8_t temp = GetAudioCodec()->output_volume();
+                if(temp == 0)
+                {
+                    GetAudioCodec()->SetOutputVolume(vol_buf);
+                }
+                else
+                {
+                    vol_buf = temp;
+                    GetAudioCodec()->SetOutputVolume(0);
+                }
             }
         }
     }
@@ -228,6 +242,7 @@ public:
         InitializeIot();
         InitializeFt6336TouchPad();
         GetBacklight()->RestoreBrightness();
+        vol_buf = GetAudioCodec()->output_volume();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

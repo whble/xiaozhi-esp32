@@ -36,14 +36,14 @@ private:
 
     DisplayLockGuard lock(this);
 
-    ui_wifisetting_group = lv_obj_create(screen);
-    lv_obj_set_width(ui_wifisetting_group, 200);
-    lv_obj_set_height(ui_wifisetting_group, 200);
-    lv_obj_set_align(ui_wifisetting_group, LV_ALIGN_CENTER);
-   // lv_obj_add_flag(ui_wifisetting_group, LV_OBJ_FLAG_HIDDEN);     /// Flags
-    lv_obj_clear_flag(ui_wifisetting_group, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_wifisetting_group, lv_color_hex(0xFE9900), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_wifisetting_group, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // ui_wifisetting_group = lv_obj_create(screen);
+    // lv_obj_set_width(ui_wifisetting_group, 200);
+    // lv_obj_set_height(ui_wifisetting_group, 200);
+    // lv_obj_set_align(ui_wifisetting_group, LV_ALIGN_CENTER);
+    // lv_obj_add_flag(ui_wifisetting_group, LV_OBJ_FLAG_HIDDEN);     /// Flags
+    // lv_obj_clear_flag(ui_wifisetting_group, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    // lv_obj_set_style_bg_color(ui_wifisetting_group, lv_color_hex(0xFE9900), LV_PART_MAIN | LV_STATE_DEFAULT);
+    // lv_obj_set_style_bg_opa(ui_wifisetting_group, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     // ui_wifititle_label = lv_label_create(ui_wifisetting_group);
     // lv_obj_set_width(ui_wifititle_label, LV_SIZE_CONTENT);   /// 1
@@ -122,6 +122,7 @@ public:
 
 class LichuangDevBoard : public Ml307Board {
 private:
+    uint8_t vol_buf;
     i2c_master_bus_handle_t i2c_bus_;
     i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
@@ -172,6 +173,19 @@ private:
             if (touch_duration < TOUCH_THRESHOLD_MS) {
                 auto& app = Application::GetInstance();
                 app.ToggleChatState();
+            }
+            else
+            {
+                uint8_t temp = GetAudioCodec()->output_volume();
+                if(temp == 0)
+                {
+                    GetAudioCodec()->SetOutputVolume(vol_buf);
+                }
+                else
+                {
+                    vol_buf = temp;
+                    GetAudioCodec()->SetOutputVolume(0);
+                }
             }
         }
     }
@@ -276,7 +290,8 @@ public:
         InitializeIot();
         InitializeFt6336TouchPad();
         GetBacklight()->RestoreBrightness();
-        GetAudioCodec()->SetOutputVolume(10);
+       // GetAudioCodec()->SetOutputVolume(10);
+       vol_buf = GetAudioCodec()->output_volume();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
