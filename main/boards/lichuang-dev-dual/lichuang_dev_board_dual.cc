@@ -1,4 +1,4 @@
-#include "wifi_board.h"
+#include "dual_network_board.h"
 #include "audio_codecs/box_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
@@ -17,8 +17,7 @@
 #include <esp_lvgl_port.h>
 #include <lvgl.h>
 
-
-#define TAG "LichuangDevBoard"
+#define TAG "LichuangDevBoard-dual"
 
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
@@ -68,8 +67,9 @@ public:
     }
 };
 
-class LichuangDevBoard : public WifiBoard {
+class LichuangDevBoard : public DualNetworkBoard {
 private:
+    uint8_t vol_buf;
     i2c_master_bus_handle_t i2c_bus_;
     i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
@@ -97,6 +97,8 @@ private:
         pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
+   
+
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num = GPIO_NUM_40;
@@ -108,14 +110,26 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
+
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-                ResetWifiConfiguration();
+            if (GetNetworkType() == NetworkType::WIFI) {
+                if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
+                    auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+                    wifi_board.ResetWifiConfiguration();
+                }
             }
             app.ToggleChatState();
+            
         });
+
+        boot_button_.OnMultipleClick([this]() {
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting || app.GetDeviceState() == kDeviceStateIdle || app.GetDeviceState() == kDeviceStateWifiConfiguring) {
+                SwitchNetworkType();
+            }
+        },4);
 
 #if CONFIG_USE_DEVICE_AEC
         boot_button_.OnDoubleClick([this]() {
@@ -242,7 +256,9 @@ private:
     }
 
 public:
-    LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+    LichuangDevBoard() : 
+     DualNetworkBoard(GPIO_NUM_11, GPIO_NUM_10, 4096),
+        boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
         InitializeSpi();
         InitializeSt7789Display();
@@ -258,7 +274,8 @@ public:
         GetBacklight()->RestoreBrightness();
     }
 
-    virtual AudioCodec* GetAudioCodec() override {
+
+  virtual AudioCodec* GetAudioCodec() override {
         static CustomAudioCodec audio_codec(
             i2c_bus_, 
             pca9557_);
@@ -273,10 +290,12 @@ public:
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
     }
-
+    
     virtual Camera* GetCamera() override {
         return camera_;
     }
+
+   
 };
 
 DECLARE_BOARD(LichuangDevBoard);
